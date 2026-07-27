@@ -31,9 +31,8 @@ SMALLTALK_PROMPT = ChatPromptTemplate.from_template(
     """You are a friendly, helpful shopping assistant for JD Retail.
 The user's message is a greeting, general chit-chat, or a general shopping question
 that is NOT about a specific company policy or a specific order/product record.
-Reply warmly and helpfully in 1-3 sentences. You may give general advice (e.g. what to
-look for in running shoes for the rain). Where natural, mention you can also help with
-returns, delivery, orders, stock levels, and current promotions.
+Reply warmly and helpfully in 1-3 sentences. You may give general advice. Where natural,
+mention you can also help with returns, delivery, orders, stock levels, and promotions.
 
 User: {question}
 Assistant:"""
@@ -64,8 +63,7 @@ def router_node(state: QAState):
 @traceable(name="smalltalk_node")
 def smalltalk_node(state: QAState):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
-    reply = llm.invoke(SMALLTALK_PROMPT.format(question=state["question"])).content
-    return {"answer": reply}
+    return {"answer": llm.invoke(SMALLTALK_PROMPT.format(question=state["question"])).content}
 
 
 @traceable(name="docs_node")
@@ -78,7 +76,7 @@ def docs_node(state: QAState):
     updates = {"doc_answer": doc_answer}
     if no_ans and state["route"] == "documents":
         updates["needs_escalation"] = True
-        updates["doc_sources"] = []
+        updates["doc_sources"] = []          # nothing was actually used
     else:
         updates["doc_sources"] = [
             {"source": d.metadata.get("source"),
@@ -128,19 +126,12 @@ def build_graph():
     g.add_node("docs", docs_node)
     g.add_node("sql", sql_node)
     g.add_node("finalize", finalize_node)
-
     g.add_edge(START, "router")
     g.add_conditional_edges("router", route_after_router, {
-        "smalltalk": "smalltalk",
-        "documents": "docs",
-        "database": "sql",
-        "both": "docs",
+        "smalltalk": "smalltalk", "documents": "docs", "database": "sql", "both": "docs",
     })
     g.add_edge("smalltalk", END)
-    g.add_conditional_edges("docs", route_after_docs, {
-        "sql": "sql",
-        "finalize": "finalize",
-    })
+    g.add_conditional_edges("docs", route_after_docs, {"sql": "sql", "finalize": "finalize"})
     g.add_edge("sql", "finalize")
     g.add_edge("finalize", END)
     return g.compile()
@@ -177,5 +168,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--graph":
         print(qa_graph.get_graph().draw_mermaid())
     else:
-        q = " ".join(sys.argv[1:]) or "which running shoes are good in the rain?"
+        q = " ".join(sys.argv[1:]) or "Do you offer gift wrapping?"
         print_result(answer(q))

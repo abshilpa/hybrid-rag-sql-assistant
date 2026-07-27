@@ -1,0 +1,42 @@
+[
+  {
+    "question": "hey hi",
+    "route": "smalltalk",
+    "reason": "greetings",
+    "answer": "Hello! It's great to hear from you! How can I assist you today? Whether you have questions about our products, need help with an order, or want to know about promotions, I'm here to help!",
+    "doc_answer": null,
+    "sql_answer": null,
+    "doc_sources": [],
+    "sql_query": null,
+    "sql_result": null,
+    "needs_escalation": false
+  },
+  {
+    "question": "\"My Nike Air Max 270 has faulty stitching after one week. What should I do?\"",
+    "route": "documents",
+    "reason": "asks about a policy regarding faulty products",
+    "answer": "If your Nike Air Max 270 has developed faulty stitching after one week, you should contact Customer Support as soon as possible. Here are the steps you should follow:\n\n1. Reach out to Customer Support via email at support@jdretaildemo.com or call +44 800 555 1000.\n2. Provide photographs of the faulty stitching where appropriate.\n3. Include proof of purchase in your communication.\n4. If requested, return the product for inspection.\n\nEach claim is assessed individually, and you may be eligible for a repair, replacement, or refund based on the outcome of the inspection.",
+    "doc_answer": "If your Nike Air Max 270 has developed faulty stitching after one week, you should contact Customer Support as soon as possible. Here are the steps you should follow:\n\n1. Reach out to Customer Support via email at support@jdretaildemo.com or call +44 800 555 1000.\n2. Provide photographs of the faulty stitching where appropriate.\n3. Include proof of purchase in your communication.\n4. If requested, return the product for inspection.\n\nEach claim is assessed individually, and you may be eligible for a repair, replacement, or refund based on the outcome of the inspection.",
+    "sql_answer": null,
+    "doc_sources": [
+      {
+        "source": "Warranty Policy.docx",
+        "page": 0,
+        "text": "JD Sports Product Quality, Warranty & Care Policy\n\n1. Product Quality Commitment\n\nAt JD Sports, we are committed to providing high-quality footwear, clothing, and sports accessories. If a product develops a manufacturing fault after purchase, customers may be eligible for a repair, replacement, or refund in accordance with UK consumer rights and our quality assessment process.\n\nAll claims are reviewed individually to ensure a fair and consistent outcome.\n\n\n\n2. Manufacturing Defects\n\nA manufacturing defect is a fault that results from the production process rather than normal use. Examples include:\n\nSole separation during normal use \n\nFaulty stitching or loose seams \n\nDefective zippers or fasteners \n\nBroken eyelets or lace loops \n\nMaterial flaws present at the time of purchase \n\nEach product is carefully inspected before a decision is made.\n\n\n\n3. Normal Wear and Tear\n\nThe following conditions are considered normal wear and are not classified as manufacturing defects:\n\nWorn shoe soles"
+      },
+      {
+        "source": "Product Care Guide.pdf",
+        "page": 3,
+        "text": "If you believe a product has developed a manufacturing fault: \n• Contact Customer Support as soon as possible.  \n• Provide photographs where appropriate.  \n• Include proof of purchase.  \n• Return the product for inspection if requested.  \nEach claim is assessed individually. \n \nSustainability \nTo help extend the life of your products: \n• Wash garments only when necessary.  \n• Use lower washing temperatures where appropriate.  \n• Repair minor damage where possible.  \n• Donate or recycle unwanted clothing.  \n• Recycle packaging responsibly.  \nFollowing these practices helps reduce environmental impact. \n \nCustomer Support \nEmail: support@jdretaildemo.com \nPhone: +44 800 555 1000 \nSupport Hours: \nMonday – Friday \n9:00 AM – 6:00 PM"
+      },
+      {
+        "source": "Returns Policy.pdf",
+        "page": 0,
+        "text": "JD Retail Returns & Refund Policy \nDocument Version: 1.2 \nLast Updated: 20 July 2026 \n \nReturns Policy \nWe want every customer to be satisfied with their purchase. If you are not completely happy with \nyour order, you may return eligible items within 30 days of the purchase date. \n \nEligibility \nProducts are eligible for return if they: \n• Are returned within 30 days of purchase.  \n• Are in their original condition.  \n• Include all original tags and packaging.  \n• Have not been worn outside.  \n• Are accompanied by proof of purchase.  \n \nNon-Returnable Items \nThe following items cannot be returned unless faulty: \n• Underwear  \n• Swimwear  \n• Gift Cards  \n• Personalised products  \n• Opened personal care products  \n \nFaulty Products \nIf an item is faulty or damaged, customers should contact Customer Support within 14 days of \nreceiving the order . \nFaulty products may qualify for: \n• Replacement  \n• Repair  \n• Full refund  \nafter inspection."
+      }
+    ],
+    "sql_query": null,
+    "sql_result": null,
+    "needs_escalation": false
+  }
+]

@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+import uuid
 import streamlit as st
 
 sys.path.append(os.path.dirname(__file__))
@@ -7,9 +9,30 @@ sys.path.append(os.path.dirname(__file__))
 from ingest import ingest_files, DOCS_DIR
 from assistant import answer
 
+HISTORY_FILE = "chat_history.json"
+
 st.set_page_config(page_title="Retail Q&A Assistant", page_icon="🛍️", layout="wide")
 st.title("🛍️ Retail Q&A Assistant")
 st.caption("Answers grounded in policy documents, the live retail database, or both.")
+
+
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+
+def save_history(history):
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 
 with st.sidebar:
     st.header("📄 Upload documents")
@@ -29,18 +52,30 @@ with st.sidebar:
         with st.spinner("Ingesting into ChromaDB..."):
             n = ingest_files(saved, replace=True)
         st.success(f"Ingested {len(saved)} document(s) — {n} chunks.")
+
+    st.markdown("---")
+    st.subheader("🕘 Conversation history")
+    if st.session_state.get("history"):
+        for t in st.session_state["history"]:
+            st.caption(f"• {t['question']}")
+        if st.button("🗑️ Clear history"):
+            st.session_state.history = []
+            save_history([])
+            st.rerun()
+    else:
+        st.caption("No questions yet.")
     st.markdown("---")
     st.caption("Documents are embedded into ChromaDB. Database answers are always live.")
 
 
 def render_result(result, idx):
-    st.markdown(f"**Route:** `{result['route']}` — {result['reason']}")
     st.markdown(result["answer"])
 
-    has_sources = result["doc_sources"] or result["sql_query"]
+    has_sources = result.get("doc_sources") or result.get("sql_query")
     if has_sources:
-        with st.expander("📌 Sources used"):
-            if result["doc_sources"]:
+        with st.expander("🔍 Details & sources"):
+            st.markdown(f"**Routing decision:** `{result['route']}` — {result['reason']}")
+            if result.get("doc_sources"):
                 st.markdown("**Supporting document chunks:**")
                 unique_files = []
                 for s in result["doc_sources"]:
@@ -56,22 +91,25 @@ def render_result(result, idx):
                         with open(path, "rb") as fh:
                             st.download_button(f"📄 Open {fname}", fh.read(),
                                                file_name=fname, key=f"dl_{idx}_{k}")
-            if result["sql_query"]:
+            if result.get("sql_query"):
                 st.markdown("**Database query:**")
                 st.code(result["sql_query"], language="sql")
                 if result.get("sql_result"):
                     st.markdown("**Query result:**")
                     st.code(result["sql_result"])
 
-    ans = result["answer"].lower()
-    if "could not find" in ans or "couldn't find" in ans or "store assistant" in ans:
+    if result.get("needs_escalation"):
         if st.button("🧑‍💼 Connect me to a store assistant", key=f"esc_{idx}"):
-            st.info("Connecting you to a live store assistant… (simulated). "
-                    "I raised a support ticket for you our assistant will get back to you shortly.")
+            ticket = "RS-" + uuid.uuid4().hex[:6].upper()
+            st.success(
+                f"✅ Thanks — I've raised ticket **#{ticket}**. A store assistant will "
+                f"review your query and get back to you by email with the details. (Simulated)"
+            )
 
 
+# Load persisted history on first load
 if "history" not in st.session_state:
-    st.session_state.history = []
+    st.session_state.history = load_history()
 
 for i, turn in enumerate(st.session_state.history):
     with st.chat_message("user"):
@@ -88,3 +126,4 @@ if question:
             result = answer(question)
         render_result(result, len(st.session_state.history))
     st.session_state.history.append(result)
+    save_history(st.session_state.history)   # persist to disk
