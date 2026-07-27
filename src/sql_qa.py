@@ -91,7 +91,7 @@ def answer_from_sql(question):
         return "Query blocked for safety (only read-only SELECT queries are allowed).", sql, None
 
     raw_result = db.run(sql)
-    result = mask_pii(raw_result)          # <-- PII redacted here
+    result = mask_pii(raw_result)          #  PII redacted here for security, before it reaches the LLM or the UI
 
     answer = llm.invoke(
         ANSWER_PROMPT.format(question=question, query=sql, result=result)
