@@ -11,16 +11,16 @@ Built for a retail scenario (JD Retail): policy PDFs + a SQLite retail database
 
 ## ✨ Features
 
-- **Hybrid retrieval** — answers from documents (RAG), the database (Text-to-SQL), or **both**, decided automatically by an LLM **router**.
-- **Document RAG** — PDF / DOCX / TXT ingestion → chunking → embeddings → **ChromaDB**, with **retrieve-then-rerank** for higher precision.
-- **Text-to-SQL** — natural language → safe, read-only `SELECT` queries against the live database (date-aware for active promotions).
-- **Source attribution** — every answer shows the document chunks (with page + snippet + openable file) and/or the exact SQL query and result.
-- **Small talk** — greetings and general shopping questions are answered conversationally.
-- **Escalation** — when an answer isn't in the knowledge base, it asks a clarifying question and offers a (simulated) handoff to a store assistant with a ticket number.
-- **Security / governance** — read-only SQL guard, **PII redaction** (customer emails), and secrets kept out of source control.
-- **Orchestration** — a **LangGraph** state machine (router → docs / sql / smalltalk → finalize).
-- **Monitoring** — full tracing of every request and component via **LangSmith**.
-- **Evaluation** — a test set scoring router accuracy, answer correctness, and retrieval **Precision@k / Recall@k / Hit-rate**.
+- **Hybrid retrieval**  answers from documents (RAG), the database (Text-to-SQL), or **both**, decided automatically by an LLM **router**.
+- **Document RAG** - PDF / DOCX / TXT ingestion → chunking → embeddings → **ChromaDB**, with **retrieve-then-rerank** for higher precision.
+- **Text-to-SQL** - natural language → safe, read-only `SELECT` queries against the live database (date-aware for active promotions).
+- **Source attribution** - every answer shows the document chunks (with page + snippet + openable file) and/or the exact SQL query and result.
+- **Small talk** - greetings and general shopping questions are answered conversationally.
+- **Escalation** - when an answer isn't in the knowledge base, it asks a clarifying question and offers a (simulated) handoff to a store assistant with a ticket number.
+- **Security / governance** - read-only SQL guard, **PII redaction** (customer emails), and secrets kept out of source control.
+- **Orchestration** - a **LangGraph** state machine (router → docs / sql / smalltalk → finalize).
+- **Monitoring** - full tracing of every request and component via **LangSmith**.
+- **Evaluation** - a test set scoring router accuracy, answer correctness, and retrieval **Precision@k / Recall@k / Hit-rate**.
 
 ---
 
@@ -123,9 +123,9 @@ Recall@k / Hit-rate** against a labelled test set.
 
 ## 🔐 Security & governance
 
-- **Read-only SQL** — only `SELECT` queries are allowed DML/DDL is blocked.
-- **PII redaction** — customer emails are masked before reaching the LLM or UI.
-- **Secrets** — API keys live in `.env` (git-ignored) a `.env.example` documents the required keys.
+- **Read-only SQL** - only `SELECT` queries are allowed DML/DDL is blocked.
+- **PII redaction** - customer emails are masked before reaching the LLM or UI.
+- **Secrets** - API keys live in `.env` (git-ignored) a `.env.example` documents the required keys.
 
 ---
 
