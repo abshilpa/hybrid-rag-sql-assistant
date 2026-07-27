@@ -57,7 +57,7 @@ See `architecture_graph.png` for the rendered LangGraph flow.
 | UI                 | Streamlit                                 |
 | Monitoring         | LangSmith                                 |
 
-> Note: SQLite stands in for BigQuery in the prototype; the SQL layer is
+> Note: SQLite stands in for BigQuery in the prototype the SQL layer is
 > swappable for BigQuery/Postgres in production.
 
 ---
@@ -123,16 +123,16 @@ Recall@k / Hit-rate** against a labelled test set.
 
 ## 🔐 Security & governance
 
-- **Read-only SQL** — only `SELECT` queries are allowed; DML/DDL is blocked.
+- **Read-only SQL** — only `SELECT` queries are allowed DML/DDL is blocked.
 - **PII redaction** — customer emails are masked before reaching the LLM or UI.
-- **Secrets** — API keys live in `.env` (git-ignored); a `.env.example` documents the required keys.
+- **Secrets** — API keys live in `.env` (git-ignored) a `.env.example` documents the required keys.
 
 ---
 
 ## ⚠️ Limitations & future work
 
-- SQLite is a stand-in for BigQuery; swap the SQL layer for production.
+- SQLite is a stand-in for BigQuery swap the SQL layer for production.
 - Store-assistant handoff is simulated (would integrate a real ticketing/live-chat system).
-- PII masking covers emails; production would use a dedicated PII engine (e.g. Presidio) for names/phones/addresses.
-- Conversation history is per-session; production would add persistent, checkpointed memory (LangGraph checkpointer).
+- PII masking covers emails production would use a dedicated PII engine (e.g. Presidio) for names/phones/addresses.
+- Conversation history is per-session production would add persistent, checkpointed memory (LangGraph checkpointer).
 - Add authentication, role-based row-level data access, caching, and rate limiting for production.
