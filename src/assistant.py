@@ -10,6 +10,10 @@ from router import route_question
 from doc_qa import answer_from_docs
 from sql_qa import answer_from_sql
 
+from cache import get_cached, add_to_cache
+
+
+
 load_dotenv()
 
 SYNTHESIS_PROMPT = ChatPromptTemplate.from_template(
@@ -43,6 +47,7 @@ NO_ANSWER = "[[NO_ANSWER]]"
 
 class QAState(TypedDict):
     question: str
+    role: str
     route: str
     reason: str
     answer: str
@@ -72,11 +77,10 @@ def docs_node(state: QAState):
     no_ans = doc_answer.strip().startswith(NO_ANSWER)
     if no_ans:
         doc_answer = doc_answer.replace(NO_ANSWER, "").strip()
-
     updates = {"doc_answer": doc_answer}
     if no_ans and state["route"] == "documents":
         updates["needs_escalation"] = True
-        updates["doc_sources"] = []          # nothing was actually used
+        updates["doc_sources"] = []
     else:
         updates["doc_sources"] = [
             {"source": d.metadata.get("source"),
@@ -89,7 +93,8 @@ def docs_node(state: QAState):
 
 @traceable(name="sql_node")
 def sql_node(state: QAState):
-    sql_answer, sql, sql_result = answer_from_sql(state["question"])
+    mask = state.get("role", "customer") != "admin"     # admin sees PII; others masked
+    sql_answer, sql, sql_result = answer_from_sql(state["question"], mask=mask)
     return {"sql_answer": sql_answer, "sql_query": sql, "sql_result": str(sql_result)}
 
 
@@ -102,11 +107,9 @@ def finalize_node(state: QAState):
         return {"answer": state.get("sql_answer") or ""}
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     combined = llm.invoke(
-        SYNTHESIS_PROMPT.format(
-            question=state["question"],
-            doc_answer=state.get("doc_answer"),
-            sql_answer=state.get("sql_answer"),
-        )
+        SYNTHESIS_PROMPT.format(question=state["question"],
+                                doc_answer=state.get("doc_answer"),
+                                sql_answer=state.get("sql_answer"))
     ).content
     return {"answer": combined}
 
@@ -140,18 +143,50 @@ def build_graph():
 qa_graph = build_graph()
 
 
+
 @traceable(name="qa_assistant")
-def answer(question):
+def answer(question, role="customer"):
+    # Capture THIS trace's run id so a 👍/👎 in the UI can attach to it in LangSmith
+    run_id = None
+    try:
+        try:
+            from langsmith import get_current_run_tree
+        except ImportError:
+            from langsmith.run_helpers import get_current_run_tree
+        rt = get_current_run_tree()
+        if rt is not None:
+            run_id = str(rt.id)
+    except Exception:
+        run_id = None
+
+    # 1) Semantic cache — skip the whole pipeline on a near-duplicate question
+    cached, sim = get_cached(question, role)
+    if cached is not None:
+        result = dict(cached)
+        result["cached"] = True
+        result["cache_similarity"] = round(sim, 3)
+        result["run_id"] = run_id          # use the CURRENT trace, not the cached one
+        return result
+
+    # 2) Run the pipeline
     initial: QAState = {
-        "question": question, "route": "", "reason": "", "answer": "",
+        "question": question, "role": role, "route": "", "reason": "", "answer": "",
         "doc_answer": None, "sql_answer": None, "doc_sources": [],
         "sql_query": None, "sql_result": None, "needs_escalation": False,
     }
-    return qa_graph.invoke(initial)
+    result = qa_graph.invoke(initial)
+    result["cached"] = False
+    result["run_id"] = run_id
+
+    # 3) Only cache DOCUMENT answers (static). Database answers stay live/real-time.
+    if result.get("route") == "documents":
+        add_to_cache(question, result, role)
+    return result
+
 
 
 def print_result(r):
-    print(f"\nQ: {r['question']}")
+    print(f"\nQ: {r['question']}   (role: {r.get('role')})")
     print(f"Route: {r['route']}   (reason: {r['reason']})")
     print(f"Needs escalation: {r['needs_escalation']}\n")
     print("Answer:\n", r["answer"])
@@ -168,5 +203,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--graph":
         print(qa_graph.get_graph().draw_mermaid())
     else:
-        q = " ".join(sys.argv[1:]) or "Do you offer gift wrapping?"
-        print_result(answer(q))
+        admin = "--admin" in sys.argv
+        args = [a for a in sys.argv[1:] if a != "--admin"]
+        q = " ".join(args) or "What is the customer name and email for order 5?"
+        print_result(answer(q, role="admin" if admin else "customer"))

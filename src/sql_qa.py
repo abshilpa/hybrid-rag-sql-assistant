@@ -1,5 +1,6 @@
 import sys
 import re
+import sqlite3
 from datetime import date
 from dotenv import load_dotenv
 from langsmith import traceable
@@ -17,9 +18,13 @@ SQL_PROMPT = ChatPromptTemplate.from_template(
 SELECT query that answers the question.
 
 Today's date is {today}. In SQLite, date('now') also returns today's date.
-- If the question asks about CURRENT / ACTIVE / "now" promotions or offers,
-  only include rows where start_date <= date('now') AND end_date >= date('now').
+- If the question asks about CURRENT / ACTIVE / "now" promotions, only include rows where
+  start_date <= date('now') AND end_date >= date('now').
 - Dates are stored as TEXT in 'YYYY-MM-DD' format.
+
+{value_hints}When filtering a categorical column, use the EXACT values listed above, and map
+the user's wording to the closest valid value (e.g. "in process" -> "Processing",
+"transit" -> "In Transit"). If the intent matches several values, include them all.
 
 Rules:
 - Output ONLY the SQL query. No explanation, no markdown fences.
@@ -45,18 +50,63 @@ SQL result: {result}
 Answer:"""
 )
 
-# --- PII protection -------------------------------------------------------
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
-def mask_pii(text):
-    """Redact PII (customer emails) BEFORE it reaches the LLM or the UI.
-    In production this would use a dedicated PII engine (e.g. Microsoft
-    Presidio) to also detect names, phone numbers and addresses."""
-    if not text:
+def _get_known_customer_names():
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute("SELECT DISTINCT customer_name FROM Orders;")
+        names = [r[0] for r in cur.fetchall() if r[0]]
+        con.close()
+        return names
+    except Exception:
+        return []
+
+
+KNOWN_NAMES = _get_known_customer_names()
+
+
+def _get_value_hints():
+    """Distinct values of low-cardinality categorical columns, so the LLM uses exact values."""
+    hints = {}
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        for table, col in [("Orders", "order_status"), ("Stores", "click_collect"),
+                           ("Products", "category"), ("Products", "brand")]:
+            try:
+                cur.execute(f"SELECT DISTINCT {col} FROM {table};")
+                vals = [str(r[0]) for r in cur.fetchall() if r[0] is not None]
+                if 0 < len(vals) <= 30:
+                    hints[f"{table}.{col}"] = vals
+            except Exception:
+                pass
+        con.close()
+    except Exception:
+        pass
+    return hints
+
+
+VALUE_HINTS = _get_value_hints()
+
+
+def _format_hints():
+    if not VALUE_HINTS:
+        return ""
+    lines = [f"- {k} is one of: {', '.join(repr(v) for v in vs)}" for k, vs in VALUE_HINTS.items()]
+    return "Known valid column values (use these EXACT values in WHERE clauses):\n" + "\n".join(lines) + "\n\n"
+
+
+def mask_pii(text, mask=True):
+    if not text or not mask:
         return text
-    return EMAIL_RE.sub("[EMAIL REDACTED]", str(text))
-# --------------------------------------------------------------------------
+    text = EMAIL_RE.sub("[EMAIL REDACTED]", str(text))
+    for name in KNOWN_NAMES:
+        if name:
+            text = text.replace(name, "[NAME REDACTED]")
+    return text
 
 
 def clean_sql(text):
@@ -79,19 +129,20 @@ def is_safe(query):
 
 
 @traceable(name="sql_pipeline")
-def answer_from_sql(question):
+def answer_from_sql(question, mask=True):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     schema = db.get_table_info()
 
     sql = clean_sql(llm.invoke(
-        SQL_PROMPT.format(schema=schema, question=question, today=date.today().isoformat())
+        SQL_PROMPT.format(schema=schema, question=question,
+                          today=date.today().isoformat(), value_hints=_format_hints())
     ).content)
 
     if not is_safe(sql):
         return "Query blocked for safety (only read-only SELECT queries are allowed).", sql, None
 
     raw_result = db.run(sql)
-    result = mask_pii(raw_result)          #  PII redacted here for security, before it reaches the LLM or the UI
+    result = mask_pii(raw_result, mask=mask)
 
     answer = llm.invoke(
         ANSWER_PROMPT.format(question=question, query=sql, result=result)
@@ -100,9 +151,11 @@ def answer_from_sql(question):
 
 
 if __name__ == "__main__":
-    question = " ".join(sys.argv[1:]) or "How many products are there?"
-    print(f"\nQ: {question}\n")
-    answer, sql, result = answer_from_sql(question)
+    admin = "--admin" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--admin"]
+    question = " ".join(args) or "how many orders are in process and transit?"
+    print(f"\nQ: {question}   (role: {'admin' if admin else 'customer'})\n")
+    answer, sql, result = answer_from_sql(question, mask=not admin)
     print("Generated SQL:", sql)
     print("Raw result :", result)
     print("\nA:", answer)

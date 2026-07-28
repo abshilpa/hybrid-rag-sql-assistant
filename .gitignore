@@ -1,6 +1,16 @@
-venv/
+# Secrets — NEVER commit
 .env
+
+# Python
 __pycache__/
 *.pyc
+venv/
+
+# Generated vector store (rebuild with: python src/ingest.py)
 chroma_store/
-.ipynb_checkpoints/
+embedding_cache/
+
+# Runtime data / logs (not source code)
+response_cache.json
+feedback_log.jsonl
+chat_history.json

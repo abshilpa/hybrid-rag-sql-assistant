@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from langsmith import traceable
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.documents import Document
+from langchain_community.retrievers import BM25Retriever
 
 from ingest import get_vectorstore
 
@@ -11,15 +13,15 @@ load_dotenv()
 
 ANSWER_PROMPT = ChatPromptTemplate.from_template(
     """You are a helpful retail support assistant answering questions about company policies.
-Use ONLY the information in the context below (never use outside knowledge), but you SHOULD
-reason over it and be genuinely helpful:
-- If the context describes a relevant policy, process, or set of conditions that addresses
-  the question — even partially — then ANSWER using it. For example, a manufacturing-fault
-  claim process answers "my item is faulty, what should I do?"; return conditions answer
-  "can I return X?".
-- ONLY if the context contains nothing relevant to the question at all, begin your reply
-  with the exact token [[NO_ANSWER]], briefly say it isn't covered, and ask ONE clarifying
-  question.
+Use ONLY the numbered context chunks below (never outside knowledge). Reason over them; if a
+chunk partially addresses the question, use it.
+
+Write your answer. Then, on a NEW line, write "SOURCES:" followed by the numbers of ONLY the
+chunks you actually used to answer, comma-separated (e.g. "SOURCES: 2"). Do not list chunks you
+did not use.
+
+If NONE of the chunks are relevant, reply with "[[NO_ANSWER]]" on the first line, briefly say it
+isn't covered and ask ONE clarifying question, then write "SOURCES:" with nothing after it.
 
 Context:
 {context}
@@ -32,20 +34,65 @@ Answer:"""
 
 
 RERANK_PROMPT = ChatPromptTemplate.from_template(
-    """You are selecting the chunks most useful for answering the question.
+    """You are ranking chunks by how useful they are for answering the question.
 Question: {question}
 
 Chunks:
 {chunks}
 
-Return ONLY a comma-separated list of the numbers of the chunks that could help
-answer the question, most useful first, at most {top_k}. Include any chunk that
-contains information related to the question (e.g. faults, claims, warranty coverage,
-product care, returns, delivery). Only omit chunks that are clearly about a completely
-different topic.
+Return ONLY a comma-separated list of the numbers of the {top_k} MOST useful chunks,
+most useful first. Prefer chunks that directly contain the answer. You may return fewer
+than {top_k} if only a couple are useful.
 """
 )
 
+
+
+MULTIQUERY_PROMPT = ChatPromptTemplate.from_template(
+    """Generate 3 alternative phrasings of the question below to improve document
+retrieval (use synonyms and related wording, e.g. "return" ↔ "refund",
+"reward points" ↔ "loyalty points"). One per line, no numbering.
+
+Question: {question}
+"""
+)
+
+
+def _all_chunks_as_documents(vs):
+    stored = vs.get(include=["documents", "metadatas"])
+    return [Document(page_content=t, metadata=m or {})
+            for t, m in zip(stored["documents"], stored["metadatas"])]
+
+
+@traceable(name="expand_queries")
+def expand_queries(question):
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    raw = llm.invoke(MULTIQUERY_PROMPT.format(question=question)).content
+    variants = [line.strip(" -•*").strip() for line in raw.splitlines() if line.strip()]
+    return [question] + variants[:3]      # original + 3 paraphrases
+
+
+@traceable(name="hybrid_retrieve")
+def hybrid_retrieve(question, retrieve_k=10):
+    """Multi-query + hybrid: paraphrase the question, then vector (MMR) + BM25 for
+    each variant, merged and de-duplicated by content."""
+    vs = get_vectorstore()
+    corpus = _all_chunks_as_documents(vs)
+    bm25 = BM25Retriever.from_documents(corpus)
+    bm25.k = retrieve_k
+    vector = vs.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": retrieve_k, "fetch_k": retrieve_k * 2, "lambda_mult": 0.5},
+    )
+
+    merged, seen = [], set()
+    for q in expand_queries(question):        # Multi-Query Retrieval
+        for d in vector.invoke(q) + bm25.invoke(q):
+            key = d.page_content.strip()[:120]
+            if key not in seen:
+                seen.add(key)
+                merged.append(d)
+    return merged
 
 
 
@@ -55,7 +102,7 @@ def rerank(question, docs, top_k=4):
     if not docs:
         return []
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    listing = "\n\n".join(f"[{i}] {d.page_content[:500]}" for i, d in enumerate(docs))
+    listing = "\n\n".join(f"[{i}] {d.page_content[:600]}" for i, d in enumerate(docs))
     raw = llm.invoke(RERANK_PROMPT.format(question=question, chunks=listing, top_k=top_k)).content.strip()
     order = []
     for tok in re.findall(r"\d+", raw):
@@ -64,31 +111,43 @@ def rerank(question, docs, top_k=4):
             order.append(i)
         if len(order) >= top_k:
             break
-    # Safety fallback: never drop everything when we have candidates
-    if not order:
-        return docs[:2]
-    return [docs[i] for i in order]
+    return [docs[i] for i in order] if order else docs[:top_k]   # fallback: top candidates, never just 1
+
 
 
 def format_docs(docs):
     blocks = []
-    for d in docs:
+    for i, d in enumerate(docs, start=1):
         src = d.metadata.get("source", "unknown")
         page = d.metadata.get("page", "?")
-        blocks.append(f"[Source: {src}, page {page}]\n{d.page_content}")
+        blocks.append(f"[{i}] (Source: {src}, page {page})\n{d.page_content}")
     return "\n\n".join(blocks)
 
 
+
 @traceable(name="docs_pipeline")
-def answer_from_docs(question, retrieve_k=15, top_k=4):
-    vs = get_vectorstore()
-    candidates = vs.as_retriever(search_kwargs={"k": retrieve_k}).invoke(question)
+def answer_from_docs(question, retrieve_k=10, top_k=6):
+    candidates = hybrid_retrieve(question, retrieve_k)
     docs = rerank(question, candidates, top_k=top_k)
 
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    prompt = ANSWER_PROMPT.format(context=format_docs(docs), question=question)
-    response = llm.invoke(prompt)
-    return response.content, docs
+    response = llm.invoke(ANSWER_PROMPT.format(context=format_docs(docs), question=question)).content
+
+    # Separate the answer text from the "SOURCES: ..." citation line
+    answer_text, cited = response, []
+    m = re.search(r"SOURCES?\s*:\s*([0-9,\s]*)", response, flags=re.IGNORECASE)
+    if m:
+        answer_text = response[:m.start()].strip()
+        for n in re.findall(r"\d+", m.group(1)):
+            idx = int(n) - 1
+            if 0 <= idx < len(docs) and idx not in cited:
+                cited.append(idx)
+
+    if answer_text.strip().startswith("[[NO_ANSWER]]"):
+        return answer_text, []                    # no sources on a no-answer
+    used = [docs[i] for i in cited] if cited else docs[:1]
+    return answer_text, used
+
 
 
 if __name__ == "__main__":
@@ -96,6 +155,6 @@ if __name__ == "__main__":
     print(f"\nQ: {question}\n")
     answer, sources = answer_from_docs(question)
     print("A:", answer)
-    print("\n--- Sources used (after reranking) ---")
+    print("\n--- Sources used (hybrid + dedup + rerank) ---")
     for d in sources:
         print(f"   - {d.metadata.get('source')} (page {d.metadata.get('page')})")
