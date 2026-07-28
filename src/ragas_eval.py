@@ -7,7 +7,7 @@ except ImportError:
     from langsmith.run_helpers import get_current_run_tree
 
 
-# ---- Shim the unused Vertex AI import that ragas eagerly loads (we only use OpenAI) ----
+
 import sys, types
 _vx = "langchain_community.chat_models.vertexai"
 try:
@@ -16,13 +16,13 @@ except Exception:
     _m = types.ModuleType(_vx)
     _m.ChatVertexAI = type("ChatVertexAI", (), {})
     sys.modules[_vx] = _m
-# ---------------------------------------------------------------------------------------
+
 
 
 import os
 from dotenv import load_dotenv
 import nest_asyncio
-nest_asyncio.apply()   # ragas runs async under the hood; this keeps it happy on Windows
+nest_asyncio.apply()   # ragas runs async 
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from doc_qa import answer_from_docs
@@ -73,7 +73,7 @@ def build_samples():
     samples = []
     for row in EVAL_SET:
         q = row["question"]
-        answer_text, docs = answer_from_docs(q)          # run YOUR pipeline
+        answer_text, docs = answer_from_docs(q)          # run  pipeline
         contexts = [d.page_content for d in docs]         # the chunks it retrieved
         print(f"   built sample: {q[:55]}...  ({len(contexts)} contexts)")
         samples.append(SingleTurnSample(
