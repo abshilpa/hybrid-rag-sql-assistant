@@ -1,10 +1,12 @@
 import os
+import re
 import glob
 import hashlib
 from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 
@@ -47,23 +49,99 @@ def _chunk_hash(source, content):
     return h.hexdigest()
 
 
-def ingest_files(file_paths, replace=True):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
-    vs = get_vectorstore()
+# --- Structure-aware chunking -------------------------------------------------
+# Split a document at its natural section/entry boundaries (each policy section,
+# each product, each catalogue entry) instead of blind fixed-size cuts. Any
+# section that is still too long falls back to recursive splitting.
 
+_MAX_SECTION_CHARS = 1000
+_MIN_SECTION_CHARS = 60
+_fallback_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=_MAX_SECTION_CHARS, chunk_overlap=100,
+    separators=["\n\n", "\n", ". ", " ", ""],
+)
+
+
+def _is_heading(line):
+    """A short title-like line that starts a new section (e.g. '2. Gift Wrapping',
+    'The Last Horizon', 'Nike Air Max 270') — not a bullet, field, or sentence."""
+    s = line.strip()
+    return (
+        bool(s)
+        and len(s) <= 60
+        and s[0] not in "*-•"
+        and ":" not in s
+        and not s.endswith((".", ",", ";", "!", "?"))
+        and len(s.split()) <= 8
+        and bool(re.search(r"[A-Za-z]", s))
+    )
+
+
+def structure_split(text):
+    lines = text.split("\n")
+    flags = [_is_heading(l) for l in lines]
+
+    # Suppress runs of >= 3 consecutive heading-like lines — those are list items
+    # (e.g. bullet lists that lost their markers), not real section headings.
+    i = 0
+    while i < len(lines):
+        if flags[i]:
+            j = i
+            while j < len(lines) and (flags[j] or not lines[j].strip()):
+                j += 1
+            run = [k for k in range(i, j) if flags[k]]
+            if len(run) >= 3:
+                for k in run:
+                    flags[k] = False
+            i = j
+        else:
+            i += 1
+
+    # Group each heading with the body that follows it, up to the next heading.
+    sections, cur = [], []
+    for idx, l in enumerate(lines):
+        if flags[idx] and any(x.strip() for x in cur):
+            sections.append("\n".join(cur).strip())
+            cur = [l]
+        else:
+            cur.append(l)
+    if cur:
+        sections.append("\n".join(cur).strip())
+    sections = [s for s in sections if s.strip()]
+
+    # Merge tiny lone-heading sections into the next one.
+    merged = []
+    for s in sections:
+        if merged and len(merged[-1]) < _MIN_SECTION_CHARS:
+            merged[-1] = merged[-1] + "\n" + s
+        else:
+            merged.append(s)
+
+    # Any section still too long is recursively split.
+    out = []
+    for s in merged:
+        out.extend([s] if len(s) <= _MAX_SECTION_CHARS else _fallback_splitter.split_text(s))
+    return out
+
+
+def ingest_files(file_paths, replace=True):
+    vs = get_vectorstore()
     added_total = 0
     changed_any = False
 
     for path in file_paths:
         name = os.path.basename(path)
 
-        # 1) Build the new chunks; each chunk's content-hash is its stable ID
+        # 1) Load, then split each page/section structurally
         docs = load_file(path)
-        chunks = splitter.split_documents(docs)
-        for c in chunks:
-            c.metadata["source"] = name
-            c.metadata.setdefault("page", 0)          # docx/txt have no pages
-            c.metadata["chunk_hash"] = _chunk_hash(name, c.page_content)
+        chunks = []
+        for d in docs:
+            for piece in structure_split(d.page_content):
+                c = Document(page_content=piece, metadata=dict(d.metadata))
+                c.metadata["source"] = name
+                c.metadata.setdefault("page", d.metadata.get("page", 0))
+                c.metadata["chunk_hash"] = _chunk_hash(name, piece)
+                chunks.append(c)
 
         # 2) What's already stored for this document?
         existing = vs.get(where={"source": name})
@@ -75,7 +153,7 @@ def ingest_files(file_paths, replace=True):
             cid = c.metadata["chunk_hash"]
             new_id_set.add(cid)
             if cid in existing_ids or cid in seen:
-                continue                              # already embedded -> skip
+                continue
             seen.add(cid)
             to_add.append(c)
 
@@ -96,7 +174,6 @@ def ingest_files(file_paths, replace=True):
 
     print(f"\nDone. {added_total} chunk(s) embedded this run (unchanged chunks were skipped).")
 
-    # Freshness: only clear the answer cache if content actually changed
     if changed_any:
         try:
             from cache import clear_cache

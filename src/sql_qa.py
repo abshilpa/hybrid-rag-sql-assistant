@@ -127,6 +127,14 @@ def is_safe(query):
         return False
     return True
 
+def _selects_pii(sql):
+    """True if the SELECT clause explicitly reads customer names or emails."""
+    m = re.search(r"select\s+(.*?)\s+from", sql, flags=re.IGNORECASE | re.DOTALL)
+    clause = (m.group(1) if m else sql).lower()
+    return "customer_name" in clause or "customer_email" in clause
+
+
+
 
 @traceable(name="sql_pipeline")
 def answer_from_sql(question, mask=True):
@@ -141,8 +149,17 @@ def answer_from_sql(question, mask=True):
     if not is_safe(sql):
         return "Query blocked for safety (only read-only SELECT queries are allowed).", sql, None
 
+    # PII governance: non-admin roles may not read customer names or emails.
+    # Refuse politely instead of running the query and masking the results.
+    if mask and _selects_pii(sql):
+        msg = ("I'm sorry, but I can't share customer names or contact details, as that "
+               "information is confidential. I'd be glad to help with product details, "
+               "prices, stock, orders, promotions, or store information instead.")
+        return msg, None, None
+
     raw_result = db.run(sql)
     result = mask_pii(raw_result, mask=mask)
+    ...
 
     answer = llm.invoke(
         ANSWER_PROMPT.format(question=question, query=sql, result=result)

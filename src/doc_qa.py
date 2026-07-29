@@ -133,20 +133,29 @@ def answer_from_docs(question, retrieve_k=10, top_k=6):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     response = llm.invoke(ANSWER_PROMPT.format(context=format_docs(docs), question=question)).content
 
-    # Separate the answer text from the "SOURCES: ..." citation line
-    answer_text, cited = response, []
-    m = re.search(r"SOURCES?\s*:\s*([0-9,\s]*)", response, flags=re.IGNORECASE)
-    if m:
-        answer_text = response[:m.start()].strip()
-        for n in re.findall(r"\d+", m.group(1)):
-            idx = int(n) - 1
-            if 0 <= idx < len(docs) and idx not in cited:
-                cited.append(idx)
+    # Strip any trailing "SOURCES:" line the model may add
+    m = re.search(r"\n?\s*SOURCES?\s*:.*$", response, flags=re.IGNORECASE | re.DOTALL)
+    answer_text = (response[:m.start()] if m else response).strip()
 
-    if answer_text.strip().startswith("[[NO_ANSWER]]"):
-        return answer_text, []                    # no sources on a no-answer
-    used = [docs[i] for i in cited] if cited else docs[:1]
-    return answer_text, used
+    if answer_text.startswith("[[NO_ANSWER]]"):
+        return answer_text, []
+
+    # Attribute sources by matching the ANSWER back to the retrieved chunks (content overlap)
+    STOP = set(("the a an is are was were of to and or in on for with it its this that these those "
+                "be as at by from you your our we they them their have has had will can may not do "
+                "does no yes if then than also more most into over under a s").split())
+    def _tok(s):
+        return {w for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 2 and w not in STOP}
+
+    ans_tok = _tok(answer_text)
+    if not ans_tok:
+        return answer_text, docs[:1]
+    scored = sorted(docs, key=lambda d: len(ans_tok & _tok(d.page_content)), reverse=True)
+    best = len(ans_tok & _tok(scored[0].page_content))
+    if best == 0:
+        return answer_text, docs[:1]
+    used = [d for d in scored if len(ans_tok & _tok(d.page_content)) >= max(2, best * 0.6)][:3]
+    return answer_text, used or [scored[0]]
 
 
 

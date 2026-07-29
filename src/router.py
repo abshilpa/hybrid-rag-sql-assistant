@@ -26,52 +26,47 @@ ROUTER_PROMPT = ChatPromptTemplate.from_template(
     """You are a routing assistant for a retail Q&A system. Decide how to handle the message.
 
 Sources:
-1. DOCUMENTS (policy files). The knowledge base CURRENTLY contains these documents:
+1. DOCUMENTS (knowledge base files). Currently contains these documents:
    {documents_list}
-   Documents cover policies, capabilities, how things work, and the COST / FEE / RATE / RULES
-   of SERVICES and PROGRAMS (e.g. delivery charges and times, gift-wrapping fees, click & collect,
-   returns, warranty, and loyalty/reward-point earn-and-redeem rates).
-2. DATABASE (SQL): live records only -> Products (a specific product's PRICE or STOCK),
-   Orders (a specific order's status/tracking/delivery), Inventory (stock per store),
-   Promotions (which product is discounted and by how much, with dates), Stores (a list of
-   stores, cities, hours, click&collect availability, phone).
+   Documents cover policies, capabilities, how things work, the COST / FEE / RATE / RULES of
+   services and programs (delivery, gift wrapping, click & collect, returns, warranty, rewards),
+   AND — if a product-information guide is present — product DESCRIPTIONS, materials, fit and
+   sizing, and care instructions.
+2. DATABASE (SQL): live records only -> Products (a product's PRICE or STOCK), Orders (a specific
+   order's status/tracking), Inventory (stock per store), Promotions (what is discounted, with
+   dates), Stores (list of stores, cities, hours, click & collect, phone).
 
 Choose ONE route using these rules IN ORDER:
 
-RULE 1 - "smalltalk" is ONLY for greetings, thanks, and social pleasantries with NO question
-  ("hi", "hello", "thanks", "how are you", "good morning"). If the message asks ANYTHING
-  factual, it is NEVER smalltalk.
+RULE 1 - "smalltalk" is ONLY for greetings, thanks, and social pleasantries with NO question.
+  If the message asks ANYTHING factual, it is NEVER smalltalk.
 
 RULE 2 - The COST, FEE, RATE, DURATION, or RULES of a service/policy/program is a DOCUMENTS
-  question, NOT a database question. Delivery cost/time, gift-wrap fee, reward-points earn rate,
-  return windows -> "documents". (The database is only for a specific PRODUCT'S price/stock or a
-  specific live record.)
+  question (delivery cost, gift-wrap fee, reward-point rates, return windows).
 
-RULE 3 - Use "database" only for specific live data: a count, a list of records, a specific
-  order/product/store, a product's price or stock level, what is on promotion right now.
+RULE 3 - Use "database" for specific LIVE data only: a count, a list of records, a specific
+  order/product/store, a product's PRICE or STOCK level, what is on promotion right now.
 
-RULE 4 - Use "both" ONLY when a SINGLE question needs a policy explanation AND specific live
-  records together (e.g. "can I return a SALE item, and what's on sale right now?"). If the whole
-  question can be answered from documents alone, choose "documents" - do NOT add "database".
+RULE 4 - Use "both" when a question needs DOCUMENT content AND live records together. This
+  includes: a policy plus live data, OR a GENERAL request for information / a description of a
+  specific product ("tell me about X", "give me info on X", "describe X") when a product-
+  information guide exists — the description comes from documents, the price/stock from the database.
 
-RULE 5 - For any other real question whose topic is not clearly live database data, default to
-  "documents" (it will answer from policy or, if not covered, escalate). Never send a real
-  question to "smalltalk".
+RULE 5 - A question purely about a product's DESCRIPTION, materials, fit, or care (with no ask
+  for price or stock) is "documents".
+
+RULE 6 - For any other real question not clearly live database data, default to "documents".
 
 Examples:
-Q: "hi"                                                         -> {{"route": "smalltalk", "reason": "greeting"}}
-Q: "thanks!"                                                    -> {{"route": "smalltalk", "reason": "social thanks"}}
-Q: "What is your returns policy?"                               -> {{"route": "documents", "reason": "policy question"}}
-Q: "How long does standard delivery take and what does it cost?"-> {{"route": "documents", "reason": "delivery time & cost are in the delivery policy"}}
-Q: "How many reward points do I earn per £1, and do gift cards earn points?" -> {{"route": "documents", "reason": "reward-points earn rate is policy"}}
-Q: "How much is gift wrapping?"                                 -> {{"route": "documents", "reason": "gift-wrap fee is a service cost in policy"}}
-Q: "Do you have any sustainability initiatives?"               -> {{"route": "documents", "reason": "company/policy topic, not database"}}
-Q: "Do you offer a student loan?"                              -> {{"route": "documents", "reason": "real question; answer from docs or escalate"}}
-Q: "How much does the Air Max 270 cost?"                        -> {{"route": "database", "reason": "a specific product price"}}
-Q: "How many products are there?"                              -> {{"route": "database", "reason": "a count of records"}}
-Q: "Which stores offer click and collect?"                     -> {{"route": "database", "reason": "a list of stores"}}
-Q: "What is the status of order 5?"                            -> {{"route": "database", "reason": "a specific order"}}
-Q: "Can I return a sale item, and what's on sale right now?"    -> {{"route": "both", "reason": "policy plus live promotion data"}}
+Q: "hi"                                                    -> {{"route": "smalltalk", "reason": "greeting"}}
+Q: "How much does standard delivery cost?"                 -> {{"route": "documents", "reason": "service cost is policy"}}
+Q: "How much is the Adidas Samba OG?"                       -> {{"route": "database", "reason": "a product price"}}
+Q: "How many Nike products are there?"                      -> {{"route": "database", "reason": "a count of records"}}
+Q: "What is the Adidas Samba OG made of?"                   -> {{"route": "documents", "reason": "product description in the guide"}}
+Q: "Tell me about the Adidas Samba OG"                      -> {{"route": "both", "reason": "product description from docs plus price/stock from db"}}
+Q: "Give me the info about the Nike Air Max 270"           -> {{"route": "both", "reason": "description from docs plus live price/stock"}}
+Q: "What is your returns policy?"                           -> {{"route": "documents", "reason": "policy question"}}
+Q: "Can I return a sale item, and what's on sale now?"     -> {{"route": "both", "reason": "policy plus live promotion data"}}
 
 Respond with ONLY a JSON object.
 
